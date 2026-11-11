@@ -1,6 +1,7 @@
 # SudokuX — Intelligent Constraint-Driven Sudoku Solver
 
 SudokuX is an educational AI project that formulates Sudoku as a Constraint Satisfaction Problem (CSP). It demonstrates backtracking search, MRV, Degree heuristic, LCV value ordering, forward checking, AC-3 arc consistency, algorithm benchmarking, difficulty estimation, and a replayable reasoning trace through Streamlit.
+App link : https://sudokux-ai-eearwamkbb5xbkfljqekbq.streamlit.app/
 
 ## Features
 
