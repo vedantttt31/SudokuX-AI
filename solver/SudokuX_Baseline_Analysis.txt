@@ -1,0 +1,127 @@
+SUDOKUX — BASELINE SOLVER ANALYSIS
+====================================
+
+Current algorithm:
+Basic Backtracking
+
+The baseline solver works correctly, but it is intentionally not intelligent yet.
+It chooses the first empty cell and tries values from 1 to 9.
+
+RESULTS FROM OUR TEST
+---------------------
+
+Nodes explored    : 4208
+Backtracks        : 4157
+Constraint checks : 37652
+Assignments       : 4208
+Max search depth  : 51
+
+WHAT THESE NUMBERS MEAN
+-----------------------
+
+1. Nodes explored = 4208
+
+The solver explored 4208 search states while trying to find the solution.
+
+A search node represents a decision point in the solving process.
+
+2. Backtracks = 4157
+
+The solver had to undo decisions 4157 times because the chosen path eventually
+led to a contradiction.
+
+This shows that the solver spends a lot of effort exploring unsuccessful paths.
+
+3. Constraint checks = 37652
+
+The solver checked whether candidate values violated Sudoku constraints
+(row, column, or 3x3 box) 37652 times.
+
+4. Assignments = 4208
+
+The solver made 4208 assignments during its search.
+
+Important:
+This is NOT the number of final filled cells. Many assignments were later
+undone during backtracking.
+
+5. Maximum search depth = 51
+
+The recursive search reached a depth of 51 decisions at its deepest point.
+
+THE MAIN FLAW
+-------------
+
+The baseline solver does not make an intelligent choice about WHICH empty
+cell to solve next.
+
+It simply does:
+
+    Find first empty cell
+            ↓
+    Try 1, 2, 3, ... 9
+            ↓
+    Continue searching
+            ↓
+    Contradiction?
+            ↓
+    Backtrack
+
+The problem is that some empty cells are highly constrained while others
+have many possible values.
+
+The baseline solver treats them almost equally.
+
+OUR AI QUESTION
+---------------
+
+Can we choose a better variable before searching?
+
+Instead of:
+
+    "Which empty cell comes first?"
+
+we want:
+
+    "Which empty cell has the fewest legal values?"
+
+This leads to our first AI heuristic:
+
+    MRV — Minimum Remaining Values
+
+GOAL OF THE NEXT STEP
+---------------------
+
+Implement MRV and then run the EXACT SAME Sudoku puzzle again.
+
+We will compare:
+
+    Basic Backtracking
+            VS
+    Backtracking + MRV
+
+We will measure:
+
+    - Nodes explored
+    - Backtracks
+    - Constraint checks
+    - Assignments
+    - Maximum search depth
+
+IMPORTANT
+---------
+
+The baseline numbers above are experimental results from our current run.
+We must NOT assume MRV will improve by a particular percentage.
+
+We will measure the actual result after implementation.
+
+PROJECT PHILOSOPHY
+------------------
+
+The baseline is not a failed solver.
+
+It is our CONTROL / BASELINE.
+
+Its purpose is to give us a reference point so that we can experimentally
+show whether AI heuristics actually reduce the search effort.
