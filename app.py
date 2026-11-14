@@ -332,32 +332,37 @@ def load_board(board):
     invalidate_results()
 
 def render_board(board, title=None, original_board=None):
+    if not board:
+        return
     if title:
         st.markdown(f"<h3>{title}</h3>", unsafe_allow_html=True)
     html = '<div class="cyber-grid-container">'
     delay = 0.0
-    for r in range(9):
-        for c in range(9):
+    for r in range(min(9, len(board))):
+        for c in range(min(9, len(board[r]))):
             val = board[r][c]
             val_str = str(val) if val != 0 else ""
             classes = ["cyber-cell"]
             if c in (2, 5): classes.append("thick-right")
             if r in (2, 5): classes.append("thick-bottom")
-            if original_board and original_board[r][c] != 0:
+            if original_board and r < len(original_board) and c < len(original_board[r]) and original_board[r][c] != 0:
                 classes.append("given")
             elif val != 0:
                 classes.append("solved")
-            html += f'<div class="{" ".join(classes)}" style="animation-delay: {delay}s;">{val_str}</div>'
+            html += f'<div class="{" ".join(classes)}" style="animation-delay: {delay:.3f}s;">{val_str}</div>'
             delay += 0.015
     html += '</div>'
     st.markdown(html, unsafe_allow_html=True)
 
 def metrics_row(metrics):
+    if not metrics:
+        return
     a, b, c, d = st.columns(4)
     a.metric("NODES", metrics.get("nodes_explored", 0))
     b.metric("BACKTRACKS", metrics.get("backtracks", 0))
     c.metric("CHECKS", metrics.get("constraint_checks", 0))
-    d.metric("TIME_MS", f"{metrics.get('time_ms', 0):.3f}")
+    time_val = metrics.get('time_ms', 0)
+    d.metric("TIME_MS", f"{time_val:.3f}" if isinstance(time_val, (int, float)) else str(time_val))
 
 
 # ==========================================
@@ -414,10 +419,15 @@ edited_grid = st.data_editor(
     hide_index=True, use_container_width=True, height=430
 )
 
-board_input = edited_grid[column_names].fillna(0).astype(int).values.tolist()
-if board_input != st.session_state.board_data:
-    st.session_state.board_data = deepcopy(board_input)
-    invalidate_results()
+try:
+    numeric_df = edited_grid[column_names].apply(pd.to_numeric, errors="coerce").fillna(0).astype(int)
+    board_input = numeric_df.clip(lower=0, upper=9).values.tolist()
+    if len(board_input) == 9 and all(len(row) == 9 for row in board_input):
+        if board_input != st.session_state.board_data:
+            st.session_state.board_data = deepcopy(board_input)
+            invalidate_results()
+except Exception:
+    pass
 
 st.markdown("<br>", unsafe_allow_html=True)
 opt1, opt2, opt3 = st.columns([1, 1, 1.35])
@@ -443,15 +453,29 @@ with reset_col:
         st.rerun()
 
 if solve_clicked:
-    config = ALGORITHMS[strategy_names[chosen_strategy]]
-    solver = SudokuSolver(deepcopy(st.session_state.board_data), record_steps=True, **config)
-    solved = solver.solve()
-    st.session_state.solve_result = {
-        "solved": solved, "solution": deepcopy(solver.board) if solved else None,
-        "metrics": solver.get_metrics(), "errors": solver.validation_errors, "method": chosen_strategy,
-    }
-    st.session_state.trace_events = solver.events
-    st.session_state.trace_index = 0
+    config = ALGORITHMS.get(strategy_names.get(chosen_strategy, ""), {})
+    try:
+        solver = SudokuSolver(deepcopy(st.session_state.board_data), record_steps=True, **config)
+        solved = solver.solve()
+        st.session_state.solve_result = {
+            "solved": solved,
+            "solution": deepcopy(solver.board) if solved else None,
+            "metrics": solver.get_metrics(),
+            "errors": solver.validation_errors,
+            "method": chosen_strategy,
+        }
+        st.session_state.trace_events = solver.events
+        st.session_state.trace_index = 0
+    except Exception as e:
+        st.session_state.solve_result = {
+            "solved": False,
+            "solution": None,
+            "metrics": {},
+            "errors": [f"Execution error: {str(e)}"],
+            "method": chosen_strategy,
+        }
+        st.session_state.trace_events = []
+        st.session_state.trace_index = 0
 
 
 # ==========================================
@@ -460,26 +484,33 @@ if solve_clicked:
 if difficulty_on:
     with st.container():
         st.markdown("<h3>THREAT_SCAN_RESULTS</h3>", unsafe_allow_html=True)
-        result = analyze_difficulty(st.session_state.board_data)
-        st.session_state.difficulty_result = result
-        if not result.get("valid"):
-            st.error("[ERR] MATRIX CORRUPTED.")
-        elif not result.get("solvable"):
-            st.warning("[WARN] NO SOLUTION VECTOR FOUND.")
-        else:
-            st.info(f"[INFO] CLASSIFICATION: {result['difficulty']}")
-            x1, x2, x3, x4 = st.columns(4)
-            x1.metric("VOID_CELLS", result["empty_cells"])
-            x2.metric("ENTROPY", result["initial_candidate_count"])
-            x3.metric("LOCKED_CELLS", result["initial_forced_cells"])
-            x4.metric("COMPLEXITY", result["complexity_score"])
+        try:
+            result = analyze_difficulty(st.session_state.board_data)
+            st.session_state.difficulty_result = result
+            if not result.get("valid"):
+                st.error("[ERR] MATRIX CORRUPTED.")
+                for err in result.get("errors", []):
+                    st.markdown(f"<div style='color:var(--magenta); font-family: monospace; margin: 4px 0 4px 10px;'>&gt; {err}</div>", unsafe_allow_html=True)
+            elif not result.get("solvable"):
+                st.warning("[WARN] NO SOLUTION VECTOR FOUND.")
+            else:
+                st.info(f"[INFO] CLASSIFICATION: {result.get('difficulty', 'UNKNOWN')}")
+                x1, x2, x3, x4 = st.columns(4)
+                x1.metric("VOID_CELLS", result.get("empty_cells", 0))
+                x2.metric("ENTROPY", result.get("initial_candidate_count", 0))
+                x3.metric("LOCKED_CELLS", result.get("initial_forced_cells", 0))
+                x4.metric("COMPLEXITY", result.get("complexity_score", 0))
+        except Exception as e:
+            st.error(f"[ERR] THREAT SCAN FAILED: {str(e)}")
 
 if st.session_state.solve_result:
     result = st.session_state.solve_result
     with st.container():
-        if result["errors"]:
+        if result.get("errors"):
             st.error("[ERR] INVALID INPUT DETECTED.")
-        elif result["solved"]:
+            for err in result["errors"]:
+                st.markdown(f"<div style='color:var(--magenta); font-family: monospace; margin: 4px 0 4px 10px;'>&gt; {err}</div>", unsafe_allow_html=True)
+        elif result.get("solved"):
             st.markdown("<div class='access-granted'>ACCESS GRANTED // MATRIX DECRYPTED</div>", unsafe_allow_html=True)
             render_board(result["solution"], title="DECRYPTED_STATE", original_board=st.session_state.board_data)
             metrics_row(result["metrics"])
@@ -492,32 +523,61 @@ if analysis_on:
         st.markdown("<h3>WARGAMES_BENCHMARK</h3>", unsafe_allow_html=True)
         run_count = st.select_slider("ITERATIONS", options=[1, 2, 3, 5], value=3)
         if st.button("INITIATE_BATTLE", use_container_width=True):
-            rows = []
-            progress = st.progress(0.0)
-            algorithms = list(ALGORITHMS.items())
-            for index, (name, config) in enumerate(algorithms):
-                runs = [run_once(st.session_state.board_data, config) for _ in range(run_count)]
-                first = runs[0]
-                rows.append({
-                    "Protocol": name, "Status": "SUCCESS" if all(x["solved"] for x in runs) else "FAIL",
-                    "Ping(ms)": round(sum(x["time_ms"] for x in runs) / run_count, 3),
-                    "Nodes": first["nodes_explored"], "Backtracks": first["backtracks"],
-                })
-                progress.progress((index + 1) / len(algorithms))
-            st.session_state.battle_result = pd.DataFrame(rows)
+            probe = SudokuSolver(deepcopy(st.session_state.board_data))
+            if probe.validation_errors:
+                st.error("[ERR] CANNOT INITIATE BATTLE: MATRIX CORRUPTED.")
+                for err in probe.validation_errors:
+                    st.markdown(f"<div style='color:var(--magenta); font-family: monospace; margin: 4px 0 4px 10px;'>&gt; {err}</div>", unsafe_allow_html=True)
+            else:
+                try:
+                    rows = []
+                    progress = st.progress(0.0)
+                    algorithms = list(ALGORITHMS.items())
+                    for index, (name, config) in enumerate(algorithms):
+                        runs = [run_once(st.session_state.board_data, config) for _ in range(run_count)]
+                        first = runs[0]
+                        rows.append({
+                            "Protocol": name, "Status": "SUCCESS" if all(x["solved"] for x in runs) else "FAIL",
+                            "Ping(ms)": round(sum(x["time_ms"] for x in runs) / run_count, 3),
+                            "Nodes": first.get("nodes_explored", 0), "Backtracks": first.get("backtracks", 0),
+                        })
+                        progress.progress((index + 1) / len(algorithms))
+                    st.session_state.battle_result = pd.DataFrame(rows)
+                except Exception as e:
+                    st.error(f"[ERR] BENCHMARK EXECUTION FAILED: {str(e)}")
         if st.session_state.battle_result is not None:
             st.dataframe(st.session_state.battle_result, hide_index=True, use_container_width=True)
 
 if st.session_state.trace_events:
     with st.expander("NEURAL_TRACE // REPLAY"):
         events = st.session_state.trace_events
-        st.caption(f"{len(events)} PACKETS LOGGED")
-        selected_event = st.slider("TIMELINE", min_value=1, max_value=max(1, len(events)), value=min(st.session_state.trace_index + 1, len(events)))
-        st.session_state.trace_index = selected_event - 1
-        event = events[st.session_state.trace_index]
-        
-        st.markdown(f"<span style='color:var(--magenta)'>[{event['type']}]</span> <span style='color:var(--green)'>{event['message']}</span><span style='animation: blink 1s step-end infinite;'>_</span>", unsafe_allow_html=True)
-        if event.get("board"):
-            render_board(event.get("board"), title=None, original_board=st.session_state.board_data)
+        st.caption(f"{len(events)} PACKET{'S' if len(events) != 1 else ''} LOGGED")
+        if len(events) > 1:
+            curr_idx = min(max(0, st.session_state.trace_index), len(events) - 1)
+            selected_event = st.slider(
+                "TIMELINE",
+                min_value=1,
+                max_value=len(events),
+                value=curr_idx + 1,
+            )
+            st.session_state.trace_index = selected_event - 1
+        else:
+            st.session_state.trace_index = 0
+
+        if 0 <= st.session_state.trace_index < len(events):
+            event = events[st.session_state.trace_index]
+            event_type = event.get('type', 'EVENT').upper()
+            event_msg = event.get('message', '')
+            st.markdown(
+                f"<span style='color:var(--magenta)'>[{event_type}]</span> "
+                f"<span style='color:var(--green)'>{event_msg}</span>"
+                f"<span style='animation: blink 1s step-end infinite;'>_</span>",
+                unsafe_allow_html=True,
+            )
+            if event.get("errors"):
+                for err in event["errors"]:
+                    st.markdown(f"<div style='color:var(--magenta); font-family: monospace; margin: 4px 0 4px 15px;'>&gt; {err}</div>", unsafe_allow_html=True)
+            if event.get("board"):
+                render_board(event.get("board"), title=None, original_board=st.session_state.board_data)
 
 st.markdown("<hr style='border-color: var(--muted);'><div style='text-align: right; font-family: monospace; color: var(--muted); font-size: 12px;'>SYS.STATUS: ONLINE // TERMINAL: SUDOKUX_V1.0.4 <span style='animation: blink 1s step-end infinite; color: var(--cyan)'>█</span></div>", unsafe_allow_html=True)
